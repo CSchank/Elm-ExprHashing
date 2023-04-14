@@ -21,45 +21,27 @@ type HashExpr = Const Float
 
 const : Float -> RawExpr
 const f = 
-    let
-        hash = hashExpr <| Const f
-    in
-        (Dict.singleton hash (Const f), hash)
+    tryHash 0 (Const f) Dict.empty
 
 var : String -> RawExpr
 var s =
-    let
-        hash = hashExpr <| Var s
-    in
-        (Dict.singleton hash (Var s), hash)
+    tryHash 0 (Var s) Dict.empty
 
 sqrt : RawExpr -> RawExpr
 sqrt (exprMap, nodeID) = 
-    let
-        hash = hashExpr <| Sqrt nodeID
-    in
-        (Dict.insert hash (Sqrt nodeID) exprMap, hash)
+    tryHash 0 (Sqrt nodeID) exprMap
 
 intPow : RawExpr -> Int -> RawExpr
 intPow (exprMap, nodeID) i = 
-    let
-        hash = hashExpr <| IntPow nodeID i
-    in
-        (Dict.insert hash (IntPow nodeID i) exprMap, hash)
+    tryHash 0 (IntPow nodeID i) exprMap
 
 exp : RawExpr -> RawExpr
 exp (exprMap, nodeID) = 
-    let
-        hash = hashExpr <| Exp nodeID
-    in
-        (Dict.insert hash (Exp nodeID) exprMap, hash)
+    tryHash 0 (Exp nodeID) exprMap
 
 ln : RawExpr -> RawExpr
 ln (exprMap, nodeID) = 
-    let
-        hash = hashExpr <| Ln nodeID
-    in
-        (Dict.insert hash (Ln nodeID) exprMap, hash)
+    tryHash 0 (Ln nodeID) exprMap
 
 mult : List RawExpr -> RawExpr
 mult rawExprs = 
@@ -69,9 +51,9 @@ mult rawExprs =
             let
                 sortedExprs = List.sortBy (\(_, nodeID) -> nodeID) rawExprs
                 (exprMap, nodeIDs) = List.unzip sortedExprs
-                hash = hashExpr <| Mult nodeIDs
+                unionizedMap = List.foldl Dict.union Dict.empty exprMap
             in
-                (Dict.insert hash (Mult nodeIDs) (List.foldl Dict.union Dict.empty exprMap), hash)
+                tryHash 0 (Mult nodeIDs) unionizedMap
 
 add : List RawExpr -> RawExpr
 add rawExprs = 
@@ -81,17 +63,13 @@ add rawExprs =
             let
                 sortedExprs = List.sortBy (\(_, nodeID) -> nodeID) rawExprs
                 (exprMap, nodeIDs) = List.unzip sortedExprs
-                hash = hashExpr <| Add nodeIDs
+                unionizedMap = List.foldl Dict.union Dict.empty exprMap
             in
-                (Dict.insert hash (Add nodeIDs) (List.foldl Dict.union Dict.empty exprMap), hash)
+                tryHash 0 (Add nodeIDs) unionizedMap
 
 neg : RawExpr -> RawExpr
 neg (exprMap, nodeID) = 
-    let
-        hash = hashExpr <| Neg nodeID
-    in
-        (Dict.insert hash (Neg nodeID) exprMap, hash)
-    
+    tryHash 0 (Neg nodeID) exprMap
 
 toString e =
     case e of
@@ -110,9 +88,19 @@ type alias ExpressionMap = Dict NodeID HashExpr
 
 type alias RawExpr = (ExpressionMap, NodeID)
 
+tryHash : Int -> HashExpr -> ExpressionMap -> RawExpr
+tryHash n hashedExpr hashTable =
+    case Dict.get (hashExpr n hashedExpr) hashTable of
+        Just foundExpr -> 
+            if foundExpr == hashedExpr then
+                (hashTable, hashExpr n hashedExpr)
+            else
+                tryHash (n+1) hashedExpr hashTable
+        Nothing -> (Dict.insert (hashExpr n hashedExpr) hashedExpr hashTable, hashExpr n hashedExpr)
 
-hashExpr : HashExpr -> NodeID
-hashExpr = String.left 8 << Sha256.sha256 << toString
+
+hashExpr : Int -> HashExpr -> NodeID
+hashExpr n hashedExpr = (String.left 8 <| Sha256.sha256 <| toString hashedExpr) ++ (String.fromInt n)
 
 test = add [const 1, const 2]
 
