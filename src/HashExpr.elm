@@ -18,6 +18,8 @@ type HashExpr = Const Float
           | Mult (List NodeID)
           | Add (List NodeID)
           | Neg NodeID
+          | Func String (List String) NodeID
+          | Let (List (String, NodeID)) {- in -} NodeID
 
 const : Float -> RawExpr
 const f = 
@@ -71,6 +73,18 @@ neg : RawExpr -> RawExpr
 neg (exprMap, nodeID) = 
     tryHash 0 (Neg nodeID) exprMap
 
+func : String -> List String -> RawExpr -> RawExpr
+func name args (exprMap, nodeID) = 
+    tryHash 0 (Func name args nodeID) exprMap
+
+let_ : List (String, RawExpr) -> RawExpr -> RawExpr
+let_ bindings (exprMap, nodeID) = 
+    let
+        (bindingExprMap, bindingNodeIDs) = List.unzip <| List.map (\(s, (exprMap_, nodeID_)) -> (exprMap_, (s, nodeID_))) bindings
+        unionizedMap = List.foldl Dict.union exprMap bindingExprMap
+    in
+        tryHash 0 (Let bindingNodeIDs nodeID) unionizedMap
+
 toString e =
     case e of
         Const f -> "Const \"" ++ (String.fromFloat f) ++ "\""
@@ -82,6 +96,8 @@ toString e =
         Mult ns -> "Mult [" ++ String.join "," ns ++ "]"
         Add ns -> "Add [" ++ String.join "," ns ++ "]"
         Neg n -> "Neg \"" ++ n ++ "\""
+        Func s ns n -> "Func \"" ++ s ++ "\" [" ++ String.join "," ns ++ "] \"" ++ n ++ "\""
+        Let ss n -> "Let [" ++ String.join "," (List.map (\(s, nn) -> "(" ++ s ++ ", " ++ nn ++ ")") ss) ++ "] \"" ++ n ++ "\""
 
 type alias NodeID = String
 type alias ExpressionMap = Dict NodeID HashExpr
