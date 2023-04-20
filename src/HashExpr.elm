@@ -18,8 +18,8 @@ type HashExpr = Const Float
           | Mult (List NodeID)
           | Add (List NodeID)
           | Neg NodeID
-          | Func String (List String) NodeID
-          | Let (List (String, NodeID)) {- in -} NodeID
+          --| Func String (List String) NodeID
+          | Let (String, NodeID) {- in -} NodeID
 
 const : Float -> RawExpr
 const f = 
@@ -53,7 +53,7 @@ mult rawExprs =
             let
                 sortedExprs = List.sortBy (\(_, nodeID) -> nodeID) rawExprs
                 (exprMap, nodeIDs) = List.unzip sortedExprs
-                unionizedMap = List.foldl Dict.union Dict.empty exprMap
+                unionizedMap = List.foldl mergeAndRehash Dict.empty exprMap
             in
                 tryHash 0 (Mult nodeIDs) unionizedMap
 
@@ -65,7 +65,7 @@ add rawExprs =
             let
                 sortedExprs = List.sortBy (\(_, nodeID) -> nodeID) rawExprs
                 (exprMap, nodeIDs) = List.unzip sortedExprs
-                unionizedMap = List.foldl Dict.union Dict.empty exprMap
+                unionizedMap = List.foldl mergeAndRehash Dict.empty exprMap
             in
                 tryHash 0 (Add nodeIDs) unionizedMap
 
@@ -73,17 +73,16 @@ neg : RawExpr -> RawExpr
 neg (exprMap, nodeID) = 
     tryHash 0 (Neg nodeID) exprMap
 
-func : String -> List String -> RawExpr -> RawExpr
-func name args (exprMap, nodeID) = 
-    tryHash 0 (Func name args nodeID) exprMap
+-- func : String -> List String -> RawExpr -> RawExpr
+-- func name args (exprMap, nodeID) = 
+--     tryHash 0 (Func name args nodeID) exprMap
 
-let_ : List (String, RawExpr) -> RawExpr -> RawExpr
-let_ bindings (exprMap, nodeID) = 
+let_ : String -> RawExpr -> RawExpr -> RawExpr
+let_ v (exprMap0, nodeID0) (exprMap1, nodeID1) = 
     let
-        (bindingExprMap, bindingNodeIDs) = List.unzip <| List.map (\(s, (exprMap_, nodeID_)) -> (exprMap_, (s, nodeID_))) bindings
-        unionizedMap = List.foldl Dict.union exprMap bindingExprMap
+        unionizedMap = mergeAndRehash exprMap0 exprMap1
     in
-        tryHash 0 (Let bindingNodeIDs nodeID) unionizedMap
+        tryHash 0 (Let (v, nodeID0) nodeID1) unionizedMap
 
 toString e =
     case e of
@@ -96,8 +95,28 @@ toString e =
         Mult ns -> "Mult [" ++ String.join "," ns ++ "]"
         Add ns -> "Add [" ++ String.join "," ns ++ "]"
         Neg n -> "Neg \"" ++ n ++ "\""
-        Func s ns n -> "Func \"" ++ s ++ "\" [" ++ String.join "," ns ++ "] \"" ++ n ++ "\""
-        Let ss n -> "Let [" ++ String.join "," (List.map (\(s, nn) -> "(" ++ s ++ ", " ++ nn ++ ")") ss) ++ "] \"" ++ n ++ "\""
+        -- Func s ns n -> "Func \"" ++ s ++ "\" [" ++ String.join "," ns ++ "] \"" ++ n ++ "\""
+        Let (v, nodeId) n -> "Let (" ++ v ++ "," ++ nodeId ++ ") \"" ++ n ++ "\""
+
+
+mergeAndRehash : ExpressionMap -> ExpressionMap -> ExpressionMap
+mergeAndRehash map1 map2 =
+    let
+        newDict = Dict.merge 
+                Dict.insert 
+                (\ k a b d -> 
+                    if a == b then
+                        Dict.insert k a d
+                    else
+                        let
+                            hash = tryHash 0 a d |> Tuple.second
+                        in
+                            Dict.insert hash a d
+                )
+                Dict.insert
+                map1 map2 Dict.empty
+    in
+        newDict
 
 type alias NodeID = String
 type alias ExpressionMap = Dict NodeID HashExpr
@@ -229,6 +248,22 @@ factor =
         |= expr
         |. spaces
         |. symbol ")"
+    , succeed let_
+        |. symbol "let"
+        |. spaces
+        |= Parser.variable
+            { start = Char.isLower
+            , inner = \c -> Char.isAlphaNum c || c == '_'
+            , reserved = Set.fromList [ "let", "in", "sqrt", "exp", "log" ]
+            }
+        |. spaces
+        |. symbol "="
+        |. spaces
+        |= expr
+        |. spaces
+        |. symbol "in"
+        |. spaces
+        |= expr
     , problem "not a constant or variable"
     ]
     
@@ -245,11 +280,70 @@ myParser =
 myTestText = "sqrt 2*3+4"
 
 
+evalExpr : Dict String Float -> RawExpr -> Result String Float
+evalExpr env (exprMap, nodeId) = 
+    eval env exprMap nodeId
 
+eval : Dict String Float -> ExpressionMap -> NodeID -> Result String Float
+eval env exprMap nodeId = 
+    case Dict.get nodeId exprMap of
+        Just (Const f) -> Ok f
+        Just (Var s) -> 
+            case Dict.get s env of
+                Just f -> Ok f
+                Nothing -> Err <| "Variable " ++ s ++ " not found in environment"
+        Just (Sqrt e) -> 
+            case eval env exprMap e of
+                Ok f -> Ok <| Basics.sqrt f
+                Err s -> Err s
+        Just (Ln e) -> 
+            case eval env exprMap e of
+                Ok f -> Ok <| Basics.logBase 2 f
+                Err s -> Err s
+        Just (Exp e) -> 
+            case eval env exprMap e of
+                Ok f -> Ok <| Basics.e ^ f
+                Err s -> Err s
+        Just (Add es) ->
+            case foldResults (List.map (eval env exprMap) es) of
+                Ok fs -> Ok <| List.sum fs
+                Err s -> Err s
+        Just (Mult es) ->
+            case foldResults (List.map (eval env exprMap) es) of
+                Ok fs -> Ok <| List.product fs
+                Err s -> Err s
+        Just (IntPow e i) ->
+            case eval env exprMap e of
+                Ok f -> Ok <| f ^ (toFloat i)
+                Err s -> Err s
+        Just (Neg e) ->
+            case eval env exprMap e of
+                Ok f -> Ok <| -f
+                Err s -> Err s
+        Just (Let (v, e) body) ->
+            case eval env exprMap e of
+                Ok f -> eval (Dict.insert v f env) exprMap body
+                Err s -> Err s
+        Nothing -> 
+            Err <| "Node " ++ nodeId ++ " not found in expression map"
 
+foldResults : List (Result x a) -> Result x (List a)
+foldResults rs =
+    case rs of
+        [] -> Ok []
+        r::rS ->
+            case r of
+                Ok a -> 
+                    case foldResults rS of
+                        Ok aS -> Ok <| a :: aS
+                        Err s -> Err s
+                Err s -> Err s
 
 -- The view function
 view model = 
+  let
+        env = Dict.fromList [("x", 2), ("y", 3)]
+  in 
   Html.div [] 
     [
       Html.h4 [] [Html.text "Input"]
@@ -257,6 +351,7 @@ view model =
     , Html.div[] [Html.textarea [A.value model.text, E.onInput NewString, A.rows 3] []]
     , Html.h4 [] [Html.text "Parser Output"]
     , Html.div [] [Html.text <| Debug.toString <| Parser.run myParser model.text]
+    , Html.div [] [Html.text <| Debug.toString <| Result.map (evalExpr env) <| Parser.run myParser model.text]
     -- , Html.pre [] [Html.text <| myDebugText model] --[Html.textarea [A.value myDebugText, A.rows 10] []]
     ]
 
