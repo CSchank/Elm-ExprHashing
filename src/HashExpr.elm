@@ -94,7 +94,6 @@ toString e =
         Mult ns -> "Mult [" ++ String.join "," ns ++ "]"
         Add ns -> "Add [" ++ String.join "," ns ++ "]"
         Neg n -> "Neg \"" ++ n ++ "\""
-        -- Func s ns n -> "Func \"" ++ s ++ "\" [" ++ String.join "," ns ++ "] \"" ++ n ++ "\""
         Let (v, nodeId) n -> "Let (" ++ v ++ "," ++ nodeId ++ ") \"" ++ n ++ "\""
 
 
