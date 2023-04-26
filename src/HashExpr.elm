@@ -18,8 +18,7 @@ type HashExpr = Const Float
           | Mult (List NodeID)
           | Add (List NodeID)
           | Neg NodeID
-          --| Func String (List String) NodeID
-          | Let (String, NodeID) {- in -} NodeID
+          | Let (String, {- = -} NodeID) {- in -} NodeID
 
 const : Float -> RawExpr
 const f = 
