@@ -9,16 +9,17 @@ import Html.Attributes as A
 import Html.Events as E
 import Parser exposing(Parser, Step, oneOf, succeed, (|=), (|.), end, symbol, spaces, lazy, problem, Step(..), loop)
 
-type HashExpr = Const Float
-          | Var String -- in math we often use Char
-          | Sqrt NodeID -- we can take sqrt(anything)
-          | IntPow NodeID Int -- the easy case of exponent
-          | Exp NodeID -- e^expr
-          | Ln NodeID
-          | Mult (List NodeID)
-          | Add (List NodeID)
-          | Neg NodeID
-          | Let (String, {- = -} NodeID) {- in -} NodeID
+type HashExpr = 
+      Const Float
+    | Var String -- in math we often use Char
+    | Sqrt NodeID -- we can take sqrt(anything)
+    | IntPow NodeID Int -- the easy case of exponent
+    | Exp NodeID -- e^expr
+    | Ln NodeID
+    | Mult (List NodeID)
+    | Add (List NodeID)
+    | Neg NodeID
+    | Let (String, {- = -} NodeID) {- in -} NodeID
 
 const : Float -> RawExpr
 const f = 
