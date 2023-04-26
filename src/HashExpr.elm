@@ -9,6 +9,11 @@ import Html.Attributes as A
 import Html.Events as E
 import Parser exposing(Parser, Step, oneOf, succeed, (|=), (|.), end, symbol, spaces, lazy, problem, Step(..), loop)
 
+type alias NodeID = String
+type alias ExpressionMap = Dict NodeID HashExpr
+
+type alias RawExpr = (ExpressionMap, NodeID)
+
 type HashExpr = 
       Const Float
     | Var String -- in math we often use Char
@@ -116,11 +121,6 @@ mergeAndRehash map1 map2 =
                 map1 map2 Dict.empty
     in
         newDict
-
-type alias NodeID = String
-type alias ExpressionMap = Dict NodeID HashExpr
-
-type alias RawExpr = (ExpressionMap, NodeID)
 
 tryHash : Int -> HashExpr -> ExpressionMap -> RawExpr
 tryHash n hashedExpr hashTable =
