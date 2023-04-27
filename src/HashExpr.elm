@@ -279,49 +279,174 @@ myParser =
 myTestText = "sqrt 2*3+4"
 
 
-evalExpr : Dict String Float -> RawExpr -> Result String Float
+evalExpr : Dict String Float -> RawExpr -> Result String (Float, Int)
 evalExpr env (exprMap, nodeId) = 
-    eval env exprMap nodeId
+    eval env 0 exprMap nodeId
 
-eval : Dict String Float -> ExpressionMap -> NodeID -> Result String Float
-eval env exprMap nodeId = 
+evalMemoExpr : Dict String Float -> RawExpr -> Result String (Float, Int)
+evalMemoExpr env (exprMap, nodeId) = 
+    evalMemo env (Dict.empty, 0) exprMap nodeId 
+        |> Result.map (\(f, (_, n)) -> (f, n))
+
+type alias MemoMap = Dict String Float
+
+-- evalMemo : Dict String Float -> (MemoMap, Int) -> ExpressionMap -> NodeID -> Result String (Float, (MemoMap, Int))
+-- evalMemo env (memoMap, n) exprMap nodeId = 
+--     case Dict.get nodeId exprMap of
+--         Just (Let (v, e) body) ->
+--             case evalMemo env (memoMap, n) exprMap e of
+--                 Ok (f, (_, nn)) -> evalMemo (Dict.insert v f env) (Dict.empty, nn+1) exprMap body
+--                 Err s -> Err s
+--         Just _ -> 
+--             case Dict.get nodeId memoMap of
+--                 Just f -> Ok (f, (memoMap, n))
+--                 Nothing -> 
+--                     case eval env n exprMap nodeId of
+--                         Ok (f, nn) -> 
+--                             let
+--                                 newMemoMap = Dict.insert nodeId f memoMap
+--                             in
+--                                 Ok (f, (newMemoMap, nn+1))
+--                         Err s -> Err s
+--         Nothing ->
+--             Err <| "Node " ++ nodeId ++ " not found in expression map"
+
+evalMemo : Dict String Float -> (MemoMap, Int) -> ExpressionMap -> NodeID -> Result String (Float, (MemoMap, Int))
+evalMemo env (memoMap, n) exprMap nodeId = 
+    case Dict.get nodeId memoMap of
+        Just f -> Ok (f, (memoMap, n))
+        Nothing ->
+            case Dict.get nodeId exprMap of
+                Just (Const f) -> 
+                    let
+                        newMemoMap = Dict.insert nodeId f memoMap
+                    in
+                        Ok (f, (newMemoMap, n+1))
+                Just (Let (v, e) body) ->
+                    case eval env n exprMap e of
+                        Ok (f, nn) -> evalMemo (Dict.insert v f env) (Dict.empty, nn+1) exprMap body
+                        Err s -> Err s
+                Just (Var s) -> 
+                    case Dict.get s env of
+                        Just f -> 
+                            let
+                                newMemoMap = Dict.insert nodeId f memoMap
+                            in
+                                Ok (f, (newMemoMap, n+1))
+                        Nothing -> Err <| "Variable " ++ s ++ " not found in environment"
+                Just (Sqrt e) -> 
+                    case evalMemo env (memoMap, n) exprMap e of
+                        Ok (f, (_, nn)) -> 
+                            let
+                                newMemoMap = Dict.insert nodeId (Basics.sqrt f) memoMap
+                            in
+                                Ok (Basics.sqrt f, (newMemoMap, nn+1))
+                        Err s -> Err s
+                Just (Ln e) -> 
+                    case evalMemo env (memoMap, n) exprMap e of
+                        Ok (f, (_, nn)) -> 
+                            let
+                                newMemoMap = Dict.insert nodeId (Basics.logBase 2 f) memoMap
+                            in
+                                Ok (Basics.logBase 2 f, (newMemoMap, nn+1))
+                        Err s -> Err s
+                Just (Exp e) -> 
+                    case evalMemo env (memoMap, n) exprMap e of
+                        Ok (f, (_, nn)) -> 
+                            let
+                                newMemoMap = Dict.insert nodeId (Basics.e ^ f) memoMap
+                            in
+                                Ok (Basics.e ^ f, (newMemoMap, nn+1))
+                        Err s -> Err s
+                Just (Add es) ->
+                    List.foldl 
+                        (\e acc -> 
+                            case acc of
+                                Ok (f, (newMemoMap, nn)) -> 
+                                    case evalMemo env (newMemoMap, nn) exprMap e of
+                                        Ok (ff, (newMemoMap2, nnn)) -> Ok (f + ff, (newMemoMap2, nnn))
+                                        Err s -> Err s
+                                Err s -> Err s
+                        )
+                        (Ok (0, (memoMap, n + List.length es - 1)))
+                        es
+                Just (Mult es) ->
+                    List.foldl 
+                        (\e acc -> 
+                            case acc of
+                                Ok (f, (newMemoMap, nn)) -> 
+                                    case evalMemo env (newMemoMap, nn) exprMap e of
+                                        Ok (ff, (newMemoMap2, nnn)) -> Ok (f * ff, (newMemoMap2, nnn))
+                                        Err s -> Err s
+                                Err s -> Err s
+                        )
+                        (Ok (1, (memoMap, n + List.length es - 1)))
+                        es
+                Just (IntPow e i) ->
+                    case evalMemo env (memoMap, n) exprMap e of
+                        Ok (f, (_, nn)) -> 
+                            let
+                                newMemoMap = Dict.insert nodeId (f ^ toFloat i) memoMap
+                            in
+                                Ok (f ^ toFloat i, (newMemoMap, nn+1))
+                        Err s -> Err s
+                Just (Neg e) ->
+                    case evalMemo env (memoMap, n) exprMap e of
+                        Ok (f, (_, nn)) -> 
+                            let
+                                newMemoMap = Dict.insert nodeId (-f) memoMap
+                            in
+                                Ok (-f, (newMemoMap, nn+1))
+                        Err s -> Err s
+                Nothing -> 
+                    Err <| "Node " ++ nodeId ++ " not found in expression map"
+
+                        
+eval : Dict String Float -> Int -> ExpressionMap -> NodeID -> Result String (Float, Int)
+eval env n exprMap nodeId = 
     case Dict.get nodeId exprMap of
-        Just (Const f) -> Ok f
+        Just (Const f) -> Ok (f, n+1)
         Just (Var s) -> 
             case Dict.get s env of
-                Just f -> Ok f
+                Just f -> Ok (f, n+1)
                 Nothing -> Err <| "Variable " ++ s ++ " not found in environment"
         Just (Sqrt e) -> 
-            case eval env exprMap e of
-                Ok f -> Ok <| Basics.sqrt f
+            case eval env n exprMap e of
+                Ok (f,nn) -> Ok (Basics.sqrt f, nn+1)
                 Err s -> Err s
         Just (Ln e) -> 
-            case eval env exprMap e of
-                Ok f -> Ok <| Basics.logBase 2 f
+            case eval env n exprMap e of
+                Ok (f, nn) -> Ok (Basics.logBase 2 f, nn)
                 Err s -> Err s
         Just (Exp e) -> 
-            case eval env exprMap e of
-                Ok f -> Ok <| Basics.e ^ f
+            case eval env n exprMap e of
+                Ok (f, nn) -> Ok (Basics.e ^ f, nn)
                 Err s -> Err s
         Just (Add es) ->
-            case foldResults (List.map (eval env exprMap) es) of
-                Ok fs -> Ok <| List.sum fs
+            case foldResults (List.map (eval env 0 exprMap) es) of
+                Ok fs -> 
+                    let (ffs, ns) = List.unzip fs
+                    in 
+                        Ok (List.sum ffs, List.sum ns + List.length es - 1)
                 Err s -> Err s
         Just (Mult es) ->
-            case foldResults (List.map (eval env exprMap) es) of
-                Ok fs -> Ok <| List.product fs
+            case foldResults (List.map (eval env 0 exprMap) es) of
+                Ok fs -> 
+                    let (ffs, ns) = List.unzip fs
+                    in 
+                        Ok (List.product ffs, List.sum ns + List.length es - 1)
                 Err s -> Err s
         Just (IntPow e i) ->
-            case eval env exprMap e of
-                Ok f -> Ok <| f ^ (toFloat i)
+            case eval env n exprMap e of
+                Ok (f, nn) -> Ok (f ^ (toFloat i), nn + 1)
                 Err s -> Err s
         Just (Neg e) ->
-            case eval env exprMap e of
-                Ok f -> Ok <| -f
+            case eval env n exprMap e of
+                Ok (f, nn) -> Ok (-f, nn+1)
                 Err s -> Err s
         Just (Let (v, e) body) ->
-            case eval env exprMap e of
-                Ok f -> eval (Dict.insert v f env) exprMap body
+            case eval env n exprMap e of
+                Ok (f, nn) -> eval (Dict.insert v f env) (nn + 1) exprMap body
                 Err s -> Err s
         Nothing -> 
             Err <| "Node " ++ nodeId ++ " not found in expression map"
@@ -341,27 +466,86 @@ foldResults rs =
 -- The view function
 view model = 
   let
-        env = Dict.fromList [("x", 2), ("y", 3)]
+        env = Parser.run environmentParser model.environmentText
   in 
   Html.div [] 
     [
       Html.h4 [] [Html.text "Input"]
     , Html.text "Type here to test different inputs"
     , Html.div[] [Html.textarea [A.value model.text, E.onInput NewString, A.rows 3] []]
+    , Html.div[] [Html.textarea [A.value model.environmentText, E.onInput NewEnvironment, A.rows 3] []]
+    
+    , Html.h4 [] [Html.text "Enviroment"]
+    , Html.div [] [Html.text <| Debug.toString env]
+    
     , Html.h4 [] [Html.text "Parser Output"]
     , Html.div [] [Html.text <| Debug.toString <| Parser.run myParser model.text]
-    , Html.div [] [Html.text <| Debug.toString <| Result.map (evalExpr env) <| Parser.run myParser model.text]
+    , Html.h4 [] [Html.text "Non-Memoized Evaluation Output"]
+    , case env of
+        Ok goodEnv -> 
+            case Result.map (evalExpr goodEnv) <| Parser.run myParser model.text of
+                Ok (Ok (f, n)) ->
+                    Html.div [] 
+                        [ Html.text <| "Result: " ++ Debug.toString f
+                        , Html.br [] []
+                        , Html.text <| "Total calculations: " ++ Debug.toString n
+                        ]
+                Ok (Err s) -> Html.text s
+                Err s -> Html.text <| Debug.toString s
+        _ -> Html.text "Could not parse environment"
+    , Html.h4 [] [Html.text "Memoized Evaluation Output"]
+    , case env of
+        Ok goodEnv -> 
+            case Result.map (evalMemoExpr goodEnv) <| Parser.run myParser model.text of
+                Ok (Ok (f, n)) ->
+                    Html.div [] 
+                        [ Html.text <| "Result: " ++ Debug.toString f
+                        , Html.br [] []
+                        , Html.text <| "Total calculations: " ++ Debug.toString n
+                        ]
+                Ok (Err s) -> Html.text s
+                Err s -> Html.text <| Debug.toString s
+        _ -> Html.text "Could not parse environment"
     -- , Html.pre [] [Html.text <| myDebugText model] --[Html.textarea [A.value myDebugText, A.rows 10] []]
     ]
 
+-- enviroment is a string like
+--  x = 2
+--  y = 3
+environmentParser : Parser (Dict String Float)
+environmentParser =
+    Parser.map Dict.fromList <| Parser.sequence 
+        { start = ""
+        , separator = ""
+        , end = ""
+        , spaces = spaces
+        , item = varParser
+        , trailing = Parser.Optional -- demand a trailing semi-colon
+        }
 
-type Msg = NewString String
+varParser : Parser (String, Float)
+varParser = 
+    succeed Tuple.pair
+        |. spaces
+        |= Parser.variable
+            { start = Char.isLower
+            , inner = \c -> Char.isAlphaNum c || c == '_'
+            , reserved = Set.fromList [ "let", "in", "sqrt", "exp", "log" ]
+            }
+        |. spaces
+        |. symbol "="
+        |. spaces
+        |= Parser.float
+        |. spaces
+
+type Msg = NewString String | NewEnvironment String
 
 type alias Model = { text: String }
 
 update msg model = case msg of
                     NewString newText -> { model | text = newText }
+                    NewEnvironment newEnv -> { model | environmentText = newEnv }
 
-init = { text = "sqrt 2 + 3" }
+init = { text = "sqrt 2 + 3", environmentText = "x = 2\ny = 3" }
 
 main = Browser.sandbox { init = init, update = update, view = view }
