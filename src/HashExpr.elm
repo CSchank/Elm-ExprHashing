@@ -283,10 +283,9 @@ evalExpr : Dict String Float -> RawExpr -> Result String (Float, Int)
 evalExpr env (exprMap, nodeId) = 
     eval env 0 exprMap nodeId
 
-evalMemoExpr : Dict String Float -> RawExpr -> Result String (Float, Int)
+evalMemoExpr : Dict String Float -> RawExpr -> Result String (Float, (MemoMap, Int))
 evalMemoExpr env (exprMap, nodeId) = 
-    evalMemo env (Dict.empty, 0) exprMap nodeId 
-        |> Result.map (\(f, (_, n)) -> (f, n))
+    evalMemo env (Dict.empty, 0) exprMap nodeId
 
 type alias MemoMap = Dict String Float
 
@@ -359,7 +358,7 @@ evalMemo env (memoMap, n) exprMap nodeId =
                                 Ok (Basics.e ^ f, (newMemoMap, nn+1))
                         Err s -> Err s
                 Just (Add es) ->
-                    List.foldl 
+                    case List.foldl 
                         (\e acc -> 
                             case acc of
                                 Ok (f, (newMemoMap, nn)) -> 
@@ -370,8 +369,15 @@ evalMemo env (memoMap, n) exprMap nodeId =
                         )
                         (Ok (0, (memoMap, n + List.length es - 1)))
                         es
+                        of
+                            Ok (f, (newMemoMap, nn)) -> 
+                                let
+                                    newMemoMap2 = Dict.insert nodeId f newMemoMap
+                                in
+                                    Ok (f, (newMemoMap2, nn))
+                            Err s -> Err s
                 Just (Mult es) ->
-                    List.foldl 
+                    case List.foldl 
                         (\e acc -> 
                             case acc of
                                 Ok (f, (newMemoMap, nn)) -> 
@@ -382,6 +388,13 @@ evalMemo env (memoMap, n) exprMap nodeId =
                         )
                         (Ok (1, (memoMap, n + List.length es - 1)))
                         es
+                        of
+                            Ok (f, (newMemoMap, nn)) -> 
+                                let
+                                    newMemoMap2 = Dict.insert nodeId f newMemoMap
+                                in
+                                    Ok (f, (newMemoMap2, nn))
+                            Err s -> Err s
                 Just (IntPow e i) ->
                     case evalMemo env (memoMap, n) exprMap e of
                         Ok (f, (_, nn)) -> 
@@ -497,11 +510,13 @@ view model =
     , case env of
         Ok goodEnv -> 
             case Result.map (evalMemoExpr goodEnv) <| Parser.run myParser model.text of
-                Ok (Ok (f, n)) ->
+                Ok (Ok (f, (memoMap,n))) ->
                     Html.div [] 
                         [ Html.text <| "Result: " ++ Debug.toString f
                         , Html.br [] []
                         , Html.text <| "Total calculations: " ++ Debug.toString n
+                        , Html.br [] []
+                        , Html.text <| "Memo map: " ++ Debug.toString memoMap
                         ]
                 Ok (Err s) -> Html.text s
                 Err s -> Html.text <| Debug.toString s
