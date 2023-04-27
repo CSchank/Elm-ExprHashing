@@ -287,7 +287,7 @@ evalMemoExpr : Dict String Float -> RawExpr -> Result String (Float, (MemoMap, I
 evalMemoExpr env (exprMap, nodeId) = 
     evalMemo env (Dict.empty, 0) exprMap nodeId
 
-type alias MemoMap = Dict String Float
+type alias MemoMap = Dict NodeID Float
 
 -- evalMemo : Dict String Float -> (MemoMap, Int) -> ExpressionMap -> NodeID -> Result String (Float, (MemoMap, Int))
 -- evalMemo env (memoMap, n) exprMap nodeId = 
